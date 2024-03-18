@@ -1,4 +1,11 @@
 # vk-boiler
+## This is a parallel fork!
+
+The default branch on this repo (`fp`) contains commits and changes that have not been upstreamed to vk-boiler because they change major parts of the API and would break other
+downstream users!
+
+Anything that gets PR-ed into upstream will be committed into the `master` branch of this repository, and kept in sync with the main repo!
+
 ## Kill some boilerplate code in Vulkan Java projects
 This is a library to reduce the amount of boilerplate code in Java Vulkan projects,
 but without trying to abstract away from any Vulkan concepts (because it is pretty
