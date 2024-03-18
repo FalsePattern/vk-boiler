@@ -45,6 +45,8 @@ public class TranslucentWindowPlayground {
         }
         glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_TRUE);
 
+        int windowIndex;
+        var pWindowIndex = new int[1];
         var boiler = new BoilerBuilder(
                 VK_API_VERSION_1_0, "TranslucentWindowPlayground", VK_MAKE_VERSION(1, 0, 0)
         )
@@ -59,16 +61,17 @@ public class TranslucentWindowPlayground {
                         VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
                         VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR,
                         VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
-                )))
+                )), i -> pWindowIndex[0] = i)
                 // Avoid annoying crashes on laptops with multiple GPUs by preferring the integrated GPU
                 .physicalDeviceSelector(new SimpleDeviceSelector(VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU))
                 .build();
 
+        windowIndex = pWindowIndex[0];
         System.out.printf(
                 "GLFW platform is %s and GLFW transparent framebuffer is %b and composite alpha mode is %s\n",
                 getIntConstantName(GLFW.class, glfwGetPlatform(), "GLFW_PLATFORM", "", "unknown"),
-                glfwGetWindowAttrib(boiler.glfwWindow(), GLFW_TRANSPARENT_FRAMEBUFFER),
-                getIntConstantName(KHRSurface.class, boiler.swapchainSettings.compositeAlpha(), "VK_COMPOSITE_ALPHA", "BIT_KHR", "unknown")
+                glfwGetWindowAttrib(boiler.glfwWindow(windowIndex), GLFW_TRANSPARENT_FRAMEBUFFER),
+                getIntConstantName(KHRSurface.class, boiler.swapchainSettings(windowIndex).compositeAlpha(), "VK_COMPOSITE_ALPHA", "BIT_KHR", "unknown")
         );
 
         var commandPool = boiler.commands.createPool(
@@ -82,12 +85,12 @@ public class TranslucentWindowPlayground {
         long oldSwapchainID = -1;
 
         int counter = 0;
-        while(!glfwWindowShouldClose(boiler.glfwWindow())) {
+        while(!glfwWindowShouldClose(boiler.glfwWindow(windowIndex))) {
             glfwPollEvents();
             try (var stack = stackPush()) {
                 int commandIndex = counter % commandFences.length;
 
-                var acquired = boiler.swapchains.acquireNextImage(VK_PRESENT_MODE_FIFO_KHR);
+                var acquired = boiler.swapchains(windowIndex).acquireNextImage(VK_PRESENT_MODE_FIFO_KHR);
                 if (acquired == null) {
                     //noinspection BusyWait
                     sleep(100);
@@ -118,7 +121,7 @@ public class TranslucentWindowPlayground {
                 );
 
                 float alpha = 0.1f + 0.9f * (float) (abs(sin(System.currentTimeMillis() / 1000.0)));
-                float colorScale = boiler.swapchainSettings.compositeAlpha() == VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR ? 1f : alpha;
+                float colorScale = boiler.swapchainSettings(windowIndex).compositeAlpha() == VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR ? 1f : alpha;
                 var pClearColor = VkClearColorValue.calloc(stack);
                 pClearColor.float32(stack.floats(0f, 0.6f * colorScale, colorScale, alpha));
 
@@ -139,7 +142,7 @@ public class TranslucentWindowPlayground {
                         ) }, fence, acquired.presentSemaphore()
                 );
 
-                boiler.swapchains.presentImage(acquired, fence);
+                boiler.swapchains(windowIndex).presentImage(acquired, fence);
             }
 
             counter += 1;

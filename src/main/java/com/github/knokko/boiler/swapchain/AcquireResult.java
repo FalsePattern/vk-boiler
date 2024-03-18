@@ -16,6 +16,7 @@ public record AcquireResult(
         int height,
         Object swapchain,
         long swapchainID,
-        Consumer<Runnable> addPreDestructionCallback
+        Consumer<Runnable> addPreDestructionCallback,
+        int windowIndex
 ) {
 }

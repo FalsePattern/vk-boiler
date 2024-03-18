@@ -23,13 +23,16 @@ import static org.lwjgl.vulkan.VK10.*;
 public class HelloTriangle {
 
     public static void main(String[] args) throws InterruptedException {
+        int windowIndex;
+        var pWindowIndex = new int[1];
         var boiler = new BoilerBuilder(
                 VK_API_VERSION_1_0, "HelloTriangle", VK_MAKE_VERSION(0, 1, 0)
         )
                 .validation()
-                .window(0L, 1000, 800, new BoilerSwapchainBuilder(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT))
+                .window(0L, 1000, 800, new BoilerSwapchainBuilder(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT), i -> pWindowIndex[0] = i)
                 .build();
 
+        windowIndex = pWindowIndex[0];
         int numFramesInFlight = 3;
         var commandPool = boiler.commands.createPool(
                 VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT | VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
@@ -46,7 +49,7 @@ public class HelloTriangle {
 
             var attachments = VkAttachmentDescription.calloc(1, stack);
             var colorAttachment = attachments.get(0);
-            colorAttachment.format(boiler.swapchainSettings.surfaceFormat().format());
+            colorAttachment.format(boiler.swapchainSettings(windowIndex).surfaceFormat().format());
             colorAttachment.samples(VK_SAMPLE_COUNT_1_BIT);
             colorAttachment.loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR);
             colorAttachment.storeOp(VK_ATTACHMENT_STORE_OP_STORE);
@@ -169,7 +172,7 @@ public class HelloTriangle {
         var swapchainResources = new SwapchainResourceManager<>(swapchainImage -> {
             try (var stack = stackPush()) {
                 long imageView = boiler.images.createSimpleView(
-                        stack, swapchainImage.vkImage(), boiler.swapchainSettings.surfaceFormat().format(),
+                        stack, swapchainImage.vkImage(), boiler.swapchainSettings(windowIndex).surfaceFormat().format(),
                         VK_IMAGE_ASPECT_COLOR_BIT, "SwapchainView " + swapchainImage.imageIndex()
                 );
 
@@ -188,7 +191,7 @@ public class HelloTriangle {
         long referenceTime = System.currentTimeMillis();
         long referenceFrames = 0;
 
-        while (!glfwWindowShouldClose(boiler.glfwWindow())) {
+        while (!glfwWindowShouldClose(boiler.glfwWindow(windowIndex))) {
             glfwPollEvents();
 
             long currentTime = System.currentTimeMillis();
@@ -199,7 +202,7 @@ public class HelloTriangle {
             }
 
             try (var stack = stackPush()) {
-                var swapchainImage = boiler.swapchains.acquireNextImage(VK_PRESENT_MODE_FIFO_KHR);
+                var swapchainImage = boiler.swapchains(windowIndex).acquireNextImage(VK_PRESENT_MODE_FIFO_KHR);
                 if (swapchainImage == null) {
                     //noinspection BusyWait
                     sleep(100);
@@ -248,7 +251,7 @@ public class HelloTriangle {
                         commandBuffer, "SubmitDraw", waitSemaphores, fence.vkFence, swapchainImage.presentSemaphore()
                 );
 
-                boiler.swapchains.presentImage(swapchainImage, fence);
+                boiler.swapchains(windowIndex).presentImage(swapchainImage, fence);
                 frameCounter += 1;
             }
         }

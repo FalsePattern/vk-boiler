@@ -65,12 +65,13 @@ public class TerrainPlayground {
     private static HeightLookup coarseHeightLookup;
     private static HeightLookup fineHeightLookup;
     private static HeightLookup coarseDeltaHeightLookup;
+    private static int windowIndex;
 
     private static long createRenderPass(MemoryStack stack, BoilerInstance boiler, int depthFormat) {
         var attachments = VkAttachmentDescription.calloc(2, stack);
         var colorAttachment = attachments.get(0);
         colorAttachment.flags(0);
-        colorAttachment.format(boiler.swapchainSettings.surfaceFormat().format());
+        colorAttachment.format(boiler.swapchainSettings(windowIndex).surfaceFormat().format());
         colorAttachment.samples(VK_SAMPLE_COUNT_1_BIT);
         colorAttachment.loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR);
         colorAttachment.storeOp(VK_ATTACHMENT_STORE_OP_STORE);
@@ -349,7 +350,7 @@ public class TerrainPlayground {
                 VK_API_VERSION_1_2, "TerrainPlayground", VK_MAKE_VERSION(0, 1, 0)
         )
                 .validation(new ValidationFeatures(true, true, false, true, true))
-                .window(0L, 1000, 800, new BoilerSwapchainBuilder(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT))
+                .window(0L, 1000, 800, new BoilerSwapchainBuilder(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT), i -> windowIndex = i)
                 .requiredFeatures12(VkPhysicalDeviceVulkan12Features::timelineSemaphore)
                 .featurePicker12((stack, supported, toEnable) -> toEnable.timelineSemaphore(true))
                 .build();
@@ -475,7 +476,7 @@ public class TerrainPlayground {
         var swapchainResources = new SwapchainResourceManager<>(swapchainImage -> {
             try (var stack = stackPush()) {
                 long imageView = boiler.images.createSimpleView(
-                        stack, swapchainImage.vkImage(), boiler.swapchainSettings.surfaceFormat().format(),
+                        stack, swapchainImage.vkImage(), boiler.swapchainSettings(windowIndex).surfaceFormat().format(),
                         VK_IMAGE_ASPECT_COLOR_BIT, "SwapchainView" + swapchainImage.imageIndex()
                 );
 
@@ -518,7 +519,7 @@ public class TerrainPlayground {
         var camera = new Camera();
         var cameraController = new CameraController();
 
-        glfwSetKeyCallback(boiler.glfwWindow(), ((window, key, scancode, action, mods) -> {
+        glfwSetKeyCallback(boiler.glfwWindow(windowIndex), ((window, key, scancode, action, mods) -> {
             float dx = 0f, dy = 0f, dz = 0f;
             if (key == GLFW_KEY_A) dx = -1f;
             if (key == GLFW_KEY_D) dx = 1f;
@@ -536,7 +537,7 @@ public class TerrainPlayground {
             camera.z += dz * scale;
         }));
 
-        glfwSetCursorPosCallback(boiler.glfwWindow(), (window, x, y) -> {
+        glfwSetCursorPosCallback(boiler.glfwWindow(windowIndex), (window, x, y) -> {
             if (!Double.isNaN(cameraController.oldX) && glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
                 double dx = x - cameraController.oldX;
                 double dy = y - cameraController.oldY;
@@ -552,7 +553,7 @@ public class TerrainPlayground {
             cameraController.oldY = y;
         });
 
-        while (!glfwWindowShouldClose(boiler.glfwWindow())) {
+        while (!glfwWindowShouldClose(boiler.glfwWindow(windowIndex))) {
             glfwPollEvents();
 
             long currentTime = System.currentTimeMillis();
@@ -563,7 +564,7 @@ public class TerrainPlayground {
             }
 
             try (var stack = stackPush()) {
-                var swapchainImage = boiler.swapchains.acquireNextImage(VK_PRESENT_MODE_MAILBOX_KHR);
+                var swapchainImage = boiler.swapchains(windowIndex).acquireNextImage(VK_PRESENT_MODE_MAILBOX_KHR);
                 if (swapchainImage == null) {
                     //noinspection BusyWait
                     sleep(100);
@@ -684,7 +685,7 @@ public class TerrainPlayground {
                         new WaitTimelineSemaphore[0], timelineFinished
                 );
 
-                boiler.swapchains.presentImage(swapchainImage, timelineFinished);
+                boiler.swapchains(windowIndex).presentImage(swapchainImage, timelineFinished);
                 frameCounter += 1;
             }
         }

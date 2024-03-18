@@ -20,18 +20,20 @@ class Swapchain {
     final long[] acquireSemaphores, presentSemaphores;
     final FatFence[] acquireFences, presentFences;
     final Collection<Runnable> destructionCallbacks = new ArrayList<>();
+    final int windowIndex;
 
     private int acquireIndex;
     private int outOfDateIndex = -1;
     private long acquireCounter;
     boolean canDestroyOldSwapchains;
 
-    Swapchain(BoilerInstance instance, long vkSwapchain, int width, int height, int presentMode) {
+    Swapchain(BoilerInstance instance, long vkSwapchain, int width, int height, int presentMode, int windowIndex) {
         this.instance = instance;
         this.vkSwapchain = vkSwapchain;
         this.width = width;
         this.height = height;
         this.presentMode = presentMode;
+        this.windowIndex = windowIndex;
 
         try (var stack = stackPush()) {
             var pNumImages = stack.callocInt(1);
@@ -49,7 +51,7 @@ class Swapchain {
             this.acquireSemaphores = instance.sync.semaphoreBank.borrowSemaphores(numImages);
             this.acquireFences = instance.sync.fenceBank.borrowSignaledFences(numImages);
             this.presentSemaphores = instance.sync.semaphoreBank.borrowSemaphores(numImages);
-            if (instance.swapchains.hasSwapchainMaintenance) {
+            if (instance.swapchains(windowIndex).hasSwapchainMaintenance) {
                 this.presentFences = instance.sync.fenceBank.borrowSignaledFences(numImages);
             } else {
                 this.presentFences = new FatFence[numImages];

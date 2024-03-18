@@ -45,7 +45,7 @@ public class TestBoilerBuilder {
         }).build();
 
         assertTrue(pDidCallInstanceCreator[0]);
-        assertThrows(UnsupportedOperationException.class, boiler::glfwWindow);
+        assertThrows(UnsupportedOperationException.class, () -> boiler.glfwWindow(0));
 
         boiler.destroyInitialObjects();
     }

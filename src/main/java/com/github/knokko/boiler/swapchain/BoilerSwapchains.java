@@ -26,15 +26,22 @@ public class BoilerSwapchains {
 
     private final BoilerInstance instance;
     final boolean hasSwapchainMaintenance;
+    private final int windowIndex;
 
     private final Collection<Swapchain> oldSwapchains = new ArrayList<>();
     private Swapchain currentSwapchain;
     private long currentSwapchainID;
     private boolean isOutOfDate;
 
+    @Deprecated
     public BoilerSwapchains(BoilerInstance instance, boolean hasSwapchainMaintenance) {
+        this(instance, hasSwapchainMaintenance, 0);
+    }
+
+    public BoilerSwapchains(BoilerInstance instance, boolean hasSwapchainMaintenance, int windowIndex) {
         this.instance = instance;
         this.hasSwapchainMaintenance = hasSwapchainMaintenance;
+        this.windowIndex = windowIndex;
     }
 
     private void recreateSwapchain(int presentMode) {
@@ -86,6 +93,9 @@ public class BoilerSwapchains {
             Consumer<VkPresentInfoKHR> beforePresentCallback
     ) {
         if (isOutOfDate) return;
+        if (acquired.windowIndex() != windowIndex) {
+            throw new IllegalStateException("Swapchain with window ID " + acquired.windowIndex() + " tried to be presented in boiler swapchain with window ID " + windowIndex);
+        }
         try (var stack = stackPush()) {
             var acquiredSwapchain = (Swapchain) acquired.swapchain();
 
@@ -122,11 +132,11 @@ public class BoilerSwapchains {
 
     public AcquireResult acquireNextImage(int presentMode) {
         //noinspection resource
-        if (currentSwapchain != null && instance.windowSurface().capabilities().currentExtent().width() == -1) {
+        if (currentSwapchain != null && instance.windowSurface(windowIndex).capabilities().currentExtent().width() == -1) {
             try (var stack = stackPush()) {
                 var pWidth = stack.callocInt(1);
                 var pHeight = stack.callocInt(1);
-                glfwGetFramebufferSize(instance.glfwWindow(), pWidth, pHeight);
+                glfwGetFramebufferSize(instance.glfwWindow(windowIndex), pWidth, pHeight);
                 int width = pWidth.get(0);
                 int height = pHeight.get(0);
                 if (width != currentSwapchain.width || height != currentSwapchain.height) isOutOfDate = true;
@@ -186,15 +196,16 @@ public class BoilerSwapchains {
                 currentSwapchain.height,
                 currentSwapchain,
                 currentSwapchainID,
-                currentSwapchain.destructionCallbacks::add
+                currentSwapchain.destructionCallbacks::add,
+                windowIndex
         );
     }
 
     private Swapchain create(long oldSwapchain, int presentMode) {
         try (var stack = stackPush()) {
-            var caps = instance.windowSurface().capabilities();
+            var caps = instance.windowSurface(windowIndex).capabilities();
             assertVkSuccess(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
-                    instance.vkPhysicalDevice(), instance.windowSurface().vkSurface(), caps
+                    instance.vkPhysicalDevice(), instance.windowSurface(windowIndex).vkSurface(), caps
             ), "GetPhysicalDeviceSurfaceCapabilitiesKHR", "SwapchainCreation");
             int width = caps.currentExtent().width();
             int height = caps.currentExtent().height();
@@ -202,7 +213,7 @@ public class BoilerSwapchains {
             if (width == -1 || height == -1) {
                 var pWidth = stack.callocInt(1);
                 var pHeight = stack.callocInt(1);
-                glfwGetFramebufferSize(instance.glfwWindow(), pWidth, pHeight);
+                glfwGetFramebufferSize(instance.glfwWindow(windowIndex), pWidth, pHeight);
                 width = pWidth.get(0);
                 height = pHeight.get(0);
             }
@@ -213,13 +224,13 @@ public class BoilerSwapchains {
             var ciSwapchain = VkSwapchainCreateInfoKHR.calloc(stack);
             ciSwapchain.sType$Default();
             ciSwapchain.flags(0);
-            ciSwapchain.surface(instance.windowSurface().vkSurface());
+            ciSwapchain.surface(instance.windowSurface(windowIndex).vkSurface());
             ciSwapchain.minImageCount(max(desiredImageCount, caps.minImageCount()));
-            ciSwapchain.imageFormat(instance.swapchainSettings.surfaceFormat().format());
-            ciSwapchain.imageColorSpace(instance.swapchainSettings.surfaceFormat().colorSpace());
+            ciSwapchain.imageFormat(instance.swapchainSettings(windowIndex).surfaceFormat().format());
+            ciSwapchain.imageColorSpace(instance.swapchainSettings(windowIndex).surfaceFormat().colorSpace());
             ciSwapchain.imageExtent().set(width, height);
             ciSwapchain.imageArrayLayers(1);
-            ciSwapchain.imageUsage(instance.swapchainSettings.imageUsage());
+            ciSwapchain.imageUsage(instance.swapchainSettings(windowIndex).imageUsage());
 
             if (instance.queueFamilies().graphics() == instance.queueFamilies().present()) {
                 ciSwapchain.imageSharingMode(VK_SHARING_MODE_EXCLUSIVE);
@@ -232,7 +243,7 @@ public class BoilerSwapchains {
             }
 
             ciSwapchain.preTransform(caps.currentTransform());
-            ciSwapchain.compositeAlpha(instance.swapchainSettings.compositeAlpha());
+            ciSwapchain.compositeAlpha(instance.swapchainSettings(windowIndex).compositeAlpha());
             ciSwapchain.presentMode(presentMode);
             ciSwapchain.clipped(true);
             ciSwapchain.oldSwapchain(oldSwapchain);
@@ -244,7 +255,7 @@ public class BoilerSwapchains {
             long swapchain = pSwapchain.get(0);
             currentSwapchainID += 1;
 
-            return new Swapchain(instance, swapchain, width, height, presentMode);
+            return new Swapchain(instance, swapchain, width, height, presentMode, windowIndex);
         }
     }
 

@@ -28,25 +28,27 @@ import static org.lwjgl.vulkan.VK10.*;
 class BoilerDeviceBuilder {
 
     static Result createDevice(BoilerBuilder builder, BoilerInstanceBuilder.Result instanceResult) {
+        int windowCount = builder.windows.length;
         VkPhysicalDevice vkPhysicalDevice;
         VkDevice vkDevice;
         Set<String> enabledExtensions;
-        long windowSurface;
+        long[] windowSurfaces = new long[windowCount];
         QueueFamilies queueFamilies;
         long vmaAllocator;
 
         try (var stack = stackPush()) {
-
-            if (builder.window != 0L) {
-                var pSurface = stack.callocLong(1);
-                assertVkSuccess(glfwCreateWindowSurface(
-                        instanceResult.vkInstance(), builder.window, null, pSurface
-                ), "glfwCreateWindowSurface", null);
-                windowSurface = pSurface.get(0);
-            } else windowSurface = 0L;
+            var pSurface = stack.callocLong(1);
+            for (int i = 0; i < windowCount; i++) {
+                if (builder.windows[i] != 0L) {
+                    assertVkSuccess(glfwCreateWindowSurface(
+                            instanceResult.vkInstance(), builder.windows[i], null, pSurface
+                                                           ), "glfwCreateWindowSurface", null);
+                    windowSurfaces[i] = pSurface.get(0);
+                } else windowSurfaces[i] = 0L;
+            }
 
             VkPhysicalDevice[] candidateDevices = BasicDeviceFilter.getCandidates(
-                    builder, instanceResult.vkInstance(), windowSurface, builder.printDeviceRejectionInfo
+                    builder, instanceResult.vkInstance(), windowSurfaces, builder.printDeviceRejectionInfo
             );
             if (candidateDevices.length == 0) throw new NoVkPhysicalDeviceException();
 
@@ -146,14 +148,21 @@ class BoilerDeviceBuilder {
             vkGetPhysicalDeviceQueueFamilyProperties(vkPhysicalDevice, pNumQueueFamilies, pQueueFamilies);
 
             boolean[] queueFamilyPresentSupport = new boolean[numQueueFamilies];
+            var pPresentSupport = stack.callocInt(1);
             for (int familyIndex = 0; familyIndex < numQueueFamilies; familyIndex++) {
-                if (windowSurface != 0L) {
-                    var pPresentSupport = stack.callocInt(1);
-                    assertVkSuccess(vkGetPhysicalDeviceSurfaceSupportKHR(
-                            vkPhysicalDevice, familyIndex, windowSurface, pPresentSupport
-                    ), "GetPhysicalDeviceSurfaceSupportKHR", "BoilerDeviceBuilder");
-                    queueFamilyPresentSupport[familyIndex] = pPresentSupport.get(0) == VK_TRUE;
-                } else queueFamilyPresentSupport[familyIndex] = true;
+                queueFamilyPresentSupport[familyIndex] = true;
+                for (int i = 0; i < windowCount; i++) {
+                    if (windowSurfaces[i] != 0L) {
+                        assertVkSuccess(vkGetPhysicalDeviceSurfaceSupportKHR(
+                                vkPhysicalDevice, familyIndex, windowSurfaces[i], pPresentSupport
+                                                                            ),
+                                        "GetPhysicalDeviceSurfaceSupportKHR", "BoilerDeviceBuilder");
+                        if (pPresentSupport.get(0) != VK_TRUE) {
+                            queueFamilyPresentSupport[familyIndex] = false;
+                            break;
+                        }
+                    }
+                }
             }
 
             var queueFamilyMapping = builder.queueFamilyMapper.mapQueueFamilies(
@@ -240,7 +249,7 @@ class BoilerDeviceBuilder {
             vmaAllocator = pAllocator.get(0);
         }
 
-        return new Result(vkPhysicalDevice, vkDevice, enabledExtensions, windowSurface, queueFamilies, vmaAllocator);
+        return new Result(vkPhysicalDevice, vkDevice, enabledExtensions, windowSurfaces, queueFamilies, vmaAllocator);
     }
 
     private static int getVmaFlags(Set<String> enabledExtensions) {
@@ -271,6 +280,6 @@ class BoilerDeviceBuilder {
 
     record Result(
             VkPhysicalDevice vkPhysicalDevice, VkDevice vkDevice, Set<String> enabledExtensions,
-            long windowSurface, QueueFamilies queueFamilies, long vmaAllocator
+            long[] windowSurfaces, QueueFamilies queueFamilies, long vmaAllocator
     ) {}
 }

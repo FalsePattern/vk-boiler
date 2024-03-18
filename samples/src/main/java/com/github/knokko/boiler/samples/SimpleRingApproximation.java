@@ -22,13 +22,16 @@ import static org.lwjgl.vulkan.VK11.VK_API_VERSION_1_1;
 public class SimpleRingApproximation {
 
     public static void main(String[] args) throws InterruptedException {
+        int windowIndex;
+        int[] pWindowIndex = new int[1];
         var boiler = new BoilerBuilder(
                 VK_API_VERSION_1_1, "SimpleRingApproximation", VK_MAKE_VERSION(0, 2, 0)
         )
                 .validation()
-                .window(0L, 1000, 800, new BoilerSwapchainBuilder(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT))
+                .window(0L, 1000, 800, new BoilerSwapchainBuilder(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT), i -> pWindowIndex[0] = i)
                 .build();
 
+        windowIndex = pWindowIndex[0];
         int numFramesInFlight = 3;
         var commandPool = boiler.commands.createPool(
                 VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
@@ -51,7 +54,7 @@ public class SimpleRingApproximation {
 
             var attachments = VkAttachmentDescription.calloc(1, stack);
             var colorAttachment = attachments.get(0);
-            colorAttachment.format(boiler.swapchainSettings.surfaceFormat().format());
+            colorAttachment.format(boiler.swapchainSettings(windowIndex).surfaceFormat().format());
             colorAttachment.samples(VK_SAMPLE_COUNT_1_BIT);
             colorAttachment.loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR);
             colorAttachment.storeOp(VK_ATTACHMENT_STORE_OP_STORE);
@@ -134,7 +137,7 @@ public class SimpleRingApproximation {
         var swapchainResources = new SwapchainResourceManager<>(swapchainImage -> {
             try (var stack = stackPush()) {
                 long imageView = boiler.images.createSimpleView(
-                        stack, swapchainImage.vkImage(), boiler.swapchainSettings.surfaceFormat().format(),
+                        stack, swapchainImage.vkImage(), boiler.swapchainSettings(windowIndex).surfaceFormat().format(),
                         VK_IMAGE_ASPECT_COLOR_BIT, "SwapchainView" + swapchainImage.imageIndex()
                 );
 
@@ -153,7 +156,7 @@ public class SimpleRingApproximation {
         long referenceTime = System.currentTimeMillis();
         long referenceFrames = 0;
 
-        while (!glfwWindowShouldClose(boiler.glfwWindow())) {
+        while (!glfwWindowShouldClose(boiler.glfwWindow(windowIndex))) {
             glfwPollEvents();
 
             long currentTime = System.currentTimeMillis();
@@ -164,7 +167,7 @@ public class SimpleRingApproximation {
             }
 
             try (var stack = stackPush()) {
-                var swapchainImage = boiler.swapchains.acquireNextImage(VK_PRESENT_MODE_MAILBOX_KHR);
+                var swapchainImage = boiler.swapchains(windowIndex).acquireNextImage(VK_PRESENT_MODE_MAILBOX_KHR);
                 if (swapchainImage == null) {
                     //noinspection BusyWait
                     sleep(100);
@@ -217,7 +220,7 @@ public class SimpleRingApproximation {
                         commandBuffer, "RingApproximation", waitSemaphores, fence, swapchainImage.presentSemaphore()
                 );
 
-                boiler.swapchains.presentImage(swapchainImage, fence);
+                boiler.swapchains(windowIndex).presentImage(swapchainImage, fence);
                 frameCounter += 1;
             }
         }

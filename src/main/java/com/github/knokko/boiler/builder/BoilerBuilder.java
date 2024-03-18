@@ -10,11 +10,14 @@ import com.github.knokko.boiler.builder.xr.BoilerXrBuilder;
 import com.github.knokko.boiler.debug.ValidationException;
 import com.github.knokko.boiler.exceptions.*;
 import com.github.knokko.boiler.instance.BoilerInstance;
+import com.github.knokko.boiler.surface.WindowSurface;
+import com.github.knokko.boiler.swapchain.SwapchainSettings;
 import com.github.knokko.boiler.util.CollectionHelper;
 import com.github.knokko.boiler.xr.XrBoiler;
 import org.lwjgl.vulkan.*;
 
 import java.util.*;
+import java.util.function.Consumer;
 
 import static com.github.knokko.boiler.builder.BoilerSwapchainBuilder.createSurface;
 import static com.github.knokko.boiler.exceptions.VulkanFailureException.assertVkSuccess;
@@ -62,10 +65,10 @@ public class BoilerBuilder {
 
     long defaultTimeout = 1_000_000_000L;
 
-    long window = 0;
-    int windowWidth = 0;
-    int windowHeight = 0;
-    BoilerSwapchainBuilder swapchainBuilder;
+    record GLFWWindowRegistration(long window, int width, int height, BoilerSwapchainBuilder swapchainBuilder) {}
+
+    final List<GLFWWindowRegistration> windowsRegistrations = new ArrayList<>();
+    long[] windows;
     boolean initGLFW = true;
 
     BoilerXrBuilder xrBuilder;
@@ -128,6 +131,20 @@ public class BoilerBuilder {
         return this;
     }
 
+    private boolean deprecatedWindowSafe = true;
+
+    @Deprecated
+    public BoilerBuilder window(long window, int width, int height, BoilerSwapchainBuilder swapchainBuilder) {
+        if (!deprecatedWindowSafe)
+            throw new IllegalStateException("Do not use the deprecated window method if you've already used the multiwindow one!");
+        var reg = new GLFWWindowRegistration(window, width, height, swapchainBuilder);
+        if (windowsRegistrations.isEmpty())
+            windowsRegistrations.add(reg);
+        else
+            windowsRegistrations.set(0, reg);
+        return this;
+    }
+
     /**
      * If all of {@code window}, {@code width}, and {@code height} are 0, no window will be created.
      * @param window The GLFW window to use, or 0 to create a new one of the given size
@@ -135,13 +152,14 @@ public class BoilerBuilder {
      * @param height The height of the window content, in pixels
      * @param swapchainBuilder Specifies the desired configuration of the swapchain to be created. Can be null
      *                         if no window is created.
+     * @param indexOutput (output) The unique index of this window. Also used for indexing into swapchains in the built boiler.
      * @return this
      */
-    public BoilerBuilder window(long window, int width, int height, BoilerSwapchainBuilder swapchainBuilder) {
-        this.window = window;
-        this.windowWidth = width;
-        this.windowHeight = height;
-        this.swapchainBuilder = swapchainBuilder;
+    public BoilerBuilder window(long window, int width, int height, BoilerSwapchainBuilder swapchainBuilder, Consumer<Integer> indexOutput) {
+        deprecatedWindowSafe = false;
+        var index = windowsRegistrations.size();
+        indexOutput.accept(index);
+        windowsRegistrations.add(new GLFWWindowRegistration(window , width, height, swapchainBuilder));
         return this;
     }
 
@@ -335,26 +353,47 @@ public class BoilerBuilder {
         if (didBuild) throw new IllegalStateException("This builder has been used already");
         didBuild = true;
 
-        if (window == 0L && windowWidth != 0 && windowHeight != 0) {
-            if (initGLFW && !glfwInit()) throw new GLFWFailureException("glfwInit() returned false");
-            glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-            window = glfwCreateWindow(windowWidth, windowHeight, applicationName, 0L, 0L);
-            if (window == 0) {
-                try (var stack = stackPush()) {
-                    var pError = stack.callocPointer(1);
-                    int errorCode = glfwGetError(pError);
-                    if (errorCode == GLFW_NO_ERROR) throw new GLFWFailureException("glfwCreateWindow() returned 0");
-                    else throw new GLFWFailureException(
-                            "glfwCreateWindow() returned 0 and glfwGetError() returned "
-                                    + errorCode + " because: " + memUTF8(pError.get())
-                    );
+        var windowCount = windowsRegistrations.size();
+        windows = new long[windowCount];
+        for (int i = 0; i < windowCount; i++) {
+            var windowRegistration = windowsRegistrations.get(i);
+            var window = windowRegistration.window();
+            var windowWidth = windowRegistration.width();
+            var windowHeight = windowRegistration.height();
+
+            if (window == 0L && windowWidth != 0 && windowHeight != 0) {
+                if (initGLFW && !glfwInit()) {
+                    throw new GLFWFailureException("glfwInit() returned false");
+                }
+                initGLFW = false;
+                glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+                window = glfwCreateWindow(windowWidth, windowHeight, applicationName, 0L, 0L);
+                if (window == 0) {
+                    try (var stack = stackPush()) {
+                        var pError = stack.callocPointer(1);
+                        int errorCode = glfwGetError(pError);
+                        if (errorCode == GLFW_NO_ERROR) {
+                            throw new GLFWFailureException("glfwCreateWindow() returned 0");
+                        } else {
+                            throw new GLFWFailureException("glfwCreateWindow() returned 0 and glfwGetError() returned " + errorCode + " because: " + memUTF8(pError.get()));
+                        }
+                    }
                 }
             }
+            windows[i] = window;
         }
 
         boolean[] pHasSwapchainMaintenance = { false };
 
-        if (window != 0L) {
+        boolean hasNonEmptyWindow = false;
+        for (int i = 0; i < windowCount; i++) {
+            if (windows[i] != 0L) {
+                hasNonEmptyWindow = true;
+                break;
+            }
+        }
+
+        if (hasNonEmptyWindow) {
             if (!glfwVulkanSupported()) throw new GLFWFailureException("glfwVulkanSupported() returned false");
             var glfwExtensions = glfwGetRequiredInstanceExtensions();
             if (glfwExtensions == null) throw new GLFWFailureException("glfwGetRequiredInstanceExtensions() returned null");
@@ -421,9 +460,16 @@ public class BoilerBuilder {
         var instanceResult = BoilerInstanceBuilder.createInstance(this);
         var deviceResult = BoilerDeviceBuilder.createDevice(this, instanceResult);
 
-        var windowSurface = deviceResult.windowSurface() != 0L ?
-                createSurface(deviceResult.vkPhysicalDevice(), deviceResult.windowSurface()) : null;
-        var swapchainSettings = windowSurface != null ? swapchainBuilder.chooseSwapchainSettings(windowSurface) : null;
+        var windowSurfaces = new WindowSurface[windowCount];
+        for (int i = 0; i < windowCount; i++) {
+            var deviceSurface = deviceResult.windowSurfaces()[i];
+            windowSurfaces[i] = deviceSurface != 0L ? createSurface(deviceResult.vkPhysicalDevice(), deviceSurface) : null;
+        }
+
+        var swapchainSettingsArr = new SwapchainSettings[windowCount];
+        for (int i = 0; i < windowCount; i++) {
+            swapchainSettingsArr[i] = windowSurfaces[i] != null ? windowsRegistrations.get(i).swapchainBuilder().chooseSwapchainSettings(windowSurfaces[i]) : null;
+        }
 
         long validationErrorThrower = 0;
         if (forbidValidationErrors) {
@@ -453,7 +499,7 @@ public class BoilerBuilder {
         }
 
         var instance = new BoilerInstance(
-                window, windowSurface, swapchainSettings, pHasSwapchainMaintenance[0], xr, defaultTimeout,
+                windows, windowSurfaces, swapchainSettingsArr, pHasSwapchainMaintenance[0], xr, defaultTimeout,
                 instanceResult.vkInstance(), deviceResult.vkPhysicalDevice(), deviceResult.vkDevice(),
                 instanceResult.enabledExtensions(), deviceResult.enabledExtensions(),
                 deviceResult.queueFamilies(), deviceResult.vmaAllocator(), validationErrorThrower

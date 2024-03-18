@@ -4,6 +4,7 @@ import org.lwjgl.vulkan.*;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -61,7 +62,7 @@ class BasicDeviceFilter {
 
     static VkPhysicalDevice[] getCandidates(
             BoilerBuilder builder, VkInstance vkInstance,
-            long windowSurface, boolean printRejectionInfo
+            long[] windowSurfaces, boolean printRejectionInfo
     ) {
         try (var stack = stackPush()) {
             var pNumDevices = stack.callocInt(1);
@@ -129,14 +130,19 @@ class BasicDeviceFilter {
                 var pQueueFamilies = VkQueueFamilyProperties.calloc(numQueueFamilies, stack);
                 vkGetPhysicalDeviceQueueFamilyProperties(device, pNumQueueFamilies, pQueueFamilies);
 
+                var pPresentSupport = stack.callocInt(1);
                 for (int queueFamilyIndex = 0; queueFamilyIndex < numQueueFamilies; queueFamilyIndex++) {
-                    if (windowSurface != 0L) {
-                        var pPresentSupport = stack.callocInt(1);
-                        assertVkSuccess(vkGetPhysicalDeviceSurfaceSupportKHR(
-                                device, queueFamilyIndex, windowSurface, pPresentSupport
-                        ), "GetPhysicalDeviceSurfaceSupportKHR", "BasicDeviceFilter");
-                        if (pPresentSupport.get(0) == VK_TRUE) hasPresentQueueFamily = true;
-                    } else hasPresentQueueFamily = true;
+                    hasPresentQueueFamily = true;
+                    for (int i = 0; i < windowSurfaces.length; i++) {
+                        if (windowSurfaces[i] != 0L) {
+                            assertVkSuccess(vkGetPhysicalDeviceSurfaceSupportKHR(device, queueFamilyIndex, windowSurfaces[i], pPresentSupport),
+                                            "GetPhysicalDeviceSurfaceSupportKHR", "BasicDeviceFilter");
+                            if (pPresentSupport.get(0) != VK_TRUE) {
+                                hasPresentQueueFamily = false;
+                                break;
+                            }
+                        }
+                    }
                     if ((pQueueFamilies.get(queueFamilyIndex).queueFlags() & VK_QUEUE_GRAPHICS_BIT) != 0) {
                         hasGraphicsQueueFamily = true;
                     }
@@ -152,7 +158,10 @@ class BasicDeviceFilter {
                 }
 
                 if (!builder.extraDeviceRequirements.stream().allMatch(
-                        requirements -> requirements.satisfiesRequirements(device, windowSurface, stack)
+                        requirements -> windowSurfaces.length == 0
+                                        ? requirements.satisfiesRequirements(device, 0, stack)
+                                        : Arrays.stream(windowSurfaces)
+                                                .allMatch(windowSurface -> requirements.satisfiesRequirements(device, windowSurface, stack))
                 )) {
                     if (printRejectionInfo) {
                         System.out.println("BasicDeviceFilter: rejected " + properties.deviceNameString()

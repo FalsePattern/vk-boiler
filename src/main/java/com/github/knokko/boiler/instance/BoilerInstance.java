@@ -28,9 +28,11 @@ public class BoilerInstance {
 
     public final long defaultTimeout;
 
-    private final long glfwWindow;
-    private final WindowSurface windowSurface;
+    private final long[] glfwWindows;
+    private final WindowSurface[] windowSurfaces;
+    @Deprecated
     public final SwapchainSettings swapchainSettings;
+    private final SwapchainSettings[] swapchainSettingsArr;
 
     private final XrBoiler xr;
 
@@ -48,11 +50,14 @@ public class BoilerInstance {
     public final BoilerPipelines pipelines;
     public final BoilerCommands commands;
     public final BoilerSync sync;
+    @Deprecated
     public final BoilerSwapchains swapchains;
+    private final BoilerSwapchains[] swapchainsArr;
     public final BoilerDebug debug;
 
     private boolean destroyed = false;
 
+    @Deprecated
     public BoilerInstance(
             long glfwWindow, WindowSurface windowSurface, SwapchainSettings swapchainSettings,
             boolean hasSwapchainMaintenance, XrBoiler xr, long defaultTimeout,
@@ -60,9 +65,28 @@ public class BoilerInstance {
             Set<String> instanceExtensions, Set<String> deviceExtensions,
             QueueFamilies queueFamilies, long vmaAllocator, long validationErrorThrower
     ) {
-        this.glfwWindow = glfwWindow;
-        this.windowSurface = windowSurface;
-        this.swapchainSettings = swapchainSettings;
+        this(new long[]{glfwWindow}, new WindowSurface[]{windowSurface}, new SwapchainSettings[]{swapchainSettings},
+             hasSwapchainMaintenance, xr, defaultTimeout,
+             vkInstance, vkPhysicalDevice, vkDevice,
+             instanceExtensions, deviceExtensions,
+             queueFamilies, vmaAllocator, validationErrorThrower);
+    }
+
+    public BoilerInstance(
+            long[] glfwWindows, WindowSurface[] windowSurfaces, SwapchainSettings[] swapchainSettingsArr,
+            boolean hasSwapchainMaintenance, XrBoiler xr, long defaultTimeout,
+            VkInstance vkInstance, VkPhysicalDevice vkPhysicalDevice, VkDevice vkDevice,
+            Set<String> instanceExtensions, Set<String> deviceExtensions,
+            QueueFamilies queueFamilies, long vmaAllocator, long validationErrorThrower
+    ) {
+        this.glfwWindows = glfwWindows;
+        this.windowSurfaces = windowSurfaces;
+        this.swapchainSettingsArr = swapchainSettingsArr;
+        if (swapchainSettingsArr.length > 0) {
+            swapchainSettings = swapchainSettingsArr[0];
+        } else {
+            swapchainSettings = null;
+        }
         this.xr = xr;
         this.defaultTimeout = defaultTimeout;
         this.vkInstance = vkInstance;
@@ -80,7 +104,15 @@ public class BoilerInstance {
         this.pipelines = new BoilerPipelines(this);
         this.commands = new BoilerCommands(this);
         this.sync = new BoilerSync(this);
-        this.swapchains = swapchainSettings != null ? new BoilerSwapchains(this, hasSwapchainMaintenance) : null;
+        this.swapchainsArr = new BoilerSwapchains[swapchainSettingsArr.length];
+        for (int i = 0; i < swapchainSettingsArr.length; i++) {
+            swapchainsArr[i] = swapchainSettingsArr[i] != null ? new BoilerSwapchains(this, hasSwapchainMaintenance, i) : null;
+        }
+        if (swapchainsArr.length > 0) {
+            swapchains = swapchainsArr[0];
+        } else {
+            swapchains = null;
+        }
         this.debug = new BoilerDebug(this);
     }
 
@@ -88,20 +120,38 @@ public class BoilerInstance {
         if (destroyed) throw new IllegalStateException("This instance has already been destroyed");
     }
 
-    private void checkWindow() {
-        if (glfwWindow == 0L) throw new UnsupportedOperationException("This instance doesn't have a window");
+    private void checkWindow(int windowIndex) {
+        if (windowIndex >= glfwWindows.length || glfwWindows[windowIndex] == 0L) throw new UnsupportedOperationException("This instance doesn't have a window at index " + windowIndex);
     }
 
+    @Deprecated
     public long glfwWindow() {
-        checkDestroyed();
-        checkWindow();
-        return glfwWindow;
+        return glfwWindow(0);
     }
 
-    public WindowSurface windowSurface() {
+    public long glfwWindow(int windowIndex) {
         checkDestroyed();
-        checkWindow();
-        return windowSurface;
+        checkWindow(windowIndex);
+        return glfwWindows[windowIndex];
+    }
+
+    @Deprecated
+    public WindowSurface windowSurface() {
+        return windowSurface(0);
+    }
+
+    public WindowSurface windowSurface(int windowIndex) {
+        checkDestroyed();
+        checkWindow(windowIndex);
+        return windowSurfaces[windowIndex];
+    }
+
+    public BoilerSwapchains swapchains(int windowIndex) {
+        return swapchainsArr[windowIndex];
+    }
+
+    public SwapchainSettings swapchainSettings(int windowIndex) {
+        return swapchainSettingsArr[windowIndex];
     }
 
     public XrBoiler xr() {
@@ -155,17 +205,34 @@ public class BoilerInstance {
     public void destroyInitialObjects() {
         checkDestroyed();
 
-        if (swapchains != null) swapchains.destroy();
+        if (swapchainsArr != null) {
+            for (var swapchains : swapchainsArr) {
+                if (swapchains != null) {
+                    swapchains.destroy();
+                }
+            }
+        }
         sync.fenceBank.destroy();
         sync.semaphoreBank.destroy();
         vmaDestroyAllocator(vmaAllocator);
         vkDestroyDevice(vkDevice, null);
-        if (windowSurface != null) windowSurface.destroy(vkInstance);
+        if (windowSurfaces != null) {
+            for (var windowSurface: windowSurfaces) {
+                if (windowSurface != null)
+                    windowSurface.destroy(vkInstance);
+            }
+        }
         if (validationErrorThrower != VK_NULL_HANDLE) {
             vkDestroyDebugUtilsMessengerEXT(vkInstance, validationErrorThrower, null);
         }
         vkDestroyInstance(vkInstance, null);
-        if (glfwWindow != 0L) glfwDestroyWindow(glfwWindow);
+        if (glfwWindows != null) {
+            for (var glfwWindow: glfwWindows) {
+                if (glfwWindow != 0L) {
+                    glfwDestroyWindow(glfwWindow);
+                }
+            }
+        }
         if (xr != null) xr.destroyInitialObjects();
 
         destroyed = true;
