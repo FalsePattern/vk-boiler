@@ -1,14 +1,40 @@
 import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+import groovy.xml.XmlSlurper
+import groovy.xml.slurpersupport.NodeChild
+import groovy.xml.slurpersupport.NodeChildren
+import org.gradle.tooling.internal.protocol.ProjectVersion3
 
 plugins {
-    java
-    id("com.github.johnrengelman.shadow") version("8.1.1")
+    `java-library`
+    id("com.github.johnrengelman.shadow") version("8.1.1") apply false
+    `maven-publish`
+    id("com.palantir.git-version") version("3.0.0")
 }
+
+val gitVersion: groovy.lang.Closure<String> by extra
 
 java {
     withSourcesJar()
 }
 
+
+fun getProjectVersionGit(): Provider<String> {
+    return provider {
+        try {
+            gitVersion()
+        } catch (_: java.lang.Exception) {
+            error("Git version not found and RELEASE_VERSION environment variable is not set!")
+        }
+    }
+}
+
+fun getProjectVersion(): Provider<String> {
+    return provider {
+        System.getenv("RELEASE_VERSION")
+    }.orElse(getProjectVersionGit())
+}
+
+version = getProjectVersion().get()
 
 val jomlVersion = "1.10.1"
 val lwjglVersion = "3.3.2"
@@ -115,3 +141,40 @@ project(":samples") {
     }
 }
 
+
+data class Credentials(val username: String?, val password: String?)
+
+fun getMavenCredentialsFromEnv(): Credentials? {
+    val username = System.getenv("MAVEN_DEPLOY_USER")
+    val password = System.getenv("MAVEN_DEPLOY_PASSWORD")
+    if (username == null || password == null) {
+        return null
+    } else {
+        return Credentials(username, password)
+    }
+}
+
+group = "com.falsepattern"
+
+publishing {
+    publications {
+        create<MavenPublication>("vk-boiler") {
+            from(components["java"])
+        }
+    }
+    repositories {
+        maven {
+            name = "mvnpattern"
+            url = uri("https://mvn.falsepattern.com/releases/")
+            val creds = getMavenCredentialsFromEnv()
+            if (creds != null) {
+                credentials {
+                    username = creds.username
+                    password = creds.password
+                }
+            } else {
+                credentials(PasswordCredentials::class)
+            }
+        }
+    }
+}
