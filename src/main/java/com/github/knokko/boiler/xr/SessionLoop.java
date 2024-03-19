@@ -236,7 +236,7 @@ public abstract class SessionLoop {
 
         assertXrSuccess(xrSyncActions(
                 session.session, syncInfo
-        ), "SyncActions", null);
+        ), "SyncActions", null, XR_SESSION_NOT_FOCUSED, XR_SESSION_LOSS_PENDING);
     }
 
     protected int getBlendMode() {
