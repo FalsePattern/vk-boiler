@@ -28,7 +28,7 @@ public class TestFixedDescriptorBank {
 
             descriptorSetLayout = boiler.descriptors.createLayout(stack, bindings, "Test");
         }
-        var bank = new FixedDescriptorBank(boiler, descriptorSetLayout, "Test", (stack, ciPool) -> {
+        var bank = FixedDescriptorBank.fromIdenticalLayout(boiler, "Test", (stack, ciPool) -> {
             var poolSizes = VkDescriptorPoolSize.calloc(1, stack);
             poolSizes.type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
             poolSizes.descriptorCount(5);
@@ -36,7 +36,7 @@ public class TestFixedDescriptorBank {
             ciPool.flags(0);
             ciPool.maxSets(2);
             ciPool.pPoolSizes(poolSizes);
-        });
+        }, descriptorSetLayout);
 
         long descriptorSet1 = bank.borrowDescriptorSet();
         long descriptorSet2 = bank.borrowDescriptorSet();

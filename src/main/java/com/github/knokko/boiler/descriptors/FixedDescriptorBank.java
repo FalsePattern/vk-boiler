@@ -5,6 +5,7 @@ import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VkDescriptorPoolCreateInfo;
 import org.lwjgl.vulkan.VkDescriptorSetAllocateInfo;
 
+import java.util.Arrays;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.function.BiConsumer;
 
@@ -36,9 +37,41 @@ public class FixedDescriptorBank {
     private final ConcurrentSkipListSet<Long> borrowedDescriptorSets;
     private final ConcurrentSkipListSet<Long> unusedDescriptorSets;
 
-    public FixedDescriptorBank(
-            BoilerInstance instance, long descriptorSetLayout, String context,
-            BiConsumer<MemoryStack, VkDescriptorPoolCreateInfo> configureDescriptorPool
+    /**
+     * DEPRECATED
+     * @see #fromIdenticalLayout(BoilerInstance, String, BiConsumer, long)
+     * @see #fromVaryingLayout(BoilerInstance, String, BiConsumer, long...)
+     */
+    @Deprecated
+    public FixedDescriptorBank(BoilerInstance instance, long descriptorSetLayout, String context,
+                               BiConsumer<MemoryStack, VkDescriptorPoolCreateInfo> configureDescriptorPool) {
+        this(instance, context, configureDescriptorPool, new long[]{descriptorSetLayout}, true);
+    }
+
+    /**
+     * Creates a descriptor bank where each descriptor set is based on an identical layout. Useful when using these in a "multiple frames in flight" pipeline.
+     */
+    public static FixedDescriptorBank fromIdenticalLayout(BoilerInstance instance, String context,
+                                                           BiConsumer<MemoryStack, VkDescriptorPoolCreateInfo> configureDescriptorPool, long descriptorSetLayout) {
+        return new FixedDescriptorBank(instance, context, configureDescriptorPool, new long[]{descriptorSetLayout}, true);
+    }
+
+    /**
+     * Creates a descriptor bank where each descriptor set is based on an identical layout.
+     * <p>
+     * The <code>descriptorSetLayouts</code> array's length MUST be identical to the maxSets value
+     * given to the pool create info in <code>configureDescriptorPool</code>
+     */
+    public static FixedDescriptorBank fromVaryingLayout(BoilerInstance instance, String context,
+                                                        BiConsumer<MemoryStack, VkDescriptorPoolCreateInfo> configureDescriptorPool, long... descriptorSetLayouts) {
+        return new FixedDescriptorBank(instance, context, configureDescriptorPool, descriptorSetLayouts, false);
+    }
+
+
+    private FixedDescriptorBank(
+            BoilerInstance instance, String context,
+            BiConsumer<MemoryStack, VkDescriptorPoolCreateInfo> configureDescriptorPool,
+            long[] descriptorSetLayouts, boolean duplicateOverAllInstances
     ) {
         this.instance = instance;
         try (var stack = stackPush()) {
@@ -46,6 +79,15 @@ public class FixedDescriptorBank {
             ciPool.sType$Default();
             configureDescriptorPool.accept(stack, ciPool);
             int capacity = ciPool.maxSets();
+            if (duplicateOverAllInstances) {
+                long theLayout = descriptorSetLayouts[0];
+                descriptorSetLayouts = new long[capacity];
+                Arrays.fill(descriptorSetLayouts, theLayout);
+            } else {
+                if (descriptorSetLayouts.length != capacity) {
+                    throw new IllegalArgumentException("Descriptor pool capacity and descriptor set layout count don't match!");
+                }
+            }
 
             var pPool = stack.callocLong(1);
             assertVkSuccess(vkCreateDescriptorPool(
@@ -56,7 +98,7 @@ public class FixedDescriptorBank {
             var aiSets = VkDescriptorSetAllocateInfo.calloc(stack);
             aiSets.sType$Default();
             aiSets.descriptorPool(descriptorPool);
-            aiSets.pSetLayouts(stack.longs(descriptorSetLayout));
+            aiSets.pSetLayouts(stack.longs(descriptorSetLayouts));
 
             var pSets = stack.callocLong(capacity);
             assertVkSuccess(vkAllocateDescriptorSets(
