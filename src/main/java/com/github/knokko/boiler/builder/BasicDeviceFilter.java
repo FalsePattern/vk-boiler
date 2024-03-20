@@ -132,17 +132,19 @@ class BasicDeviceFilter {
 
                 var pPresentSupport = stack.callocInt(1);
                 for (int queueFamilyIndex = 0; queueFamilyIndex < numQueueFamilies; queueFamilyIndex++) {
-                    hasPresentQueueFamily = true;
+                    boolean currentFamilyHasPresent = true;
                     for (int i = 0; i < windowSurfaces.length; i++) {
                         if (windowSurfaces[i] != 0L) {
                             assertVkSuccess(vkGetPhysicalDeviceSurfaceSupportKHR(device, queueFamilyIndex, windowSurfaces[i], pPresentSupport),
                                             "GetPhysicalDeviceSurfaceSupportKHR", "BasicDeviceFilter");
                             if (pPresentSupport.get(0) != VK_TRUE) {
-                                hasPresentQueueFamily = false;
+                                currentFamilyHasPresent = false;
                                 break;
                             }
                         }
                     }
+                    if (currentFamilyHasPresent)
+                        hasPresentQueueFamily = true;
                     if ((pQueueFamilies.get(queueFamilyIndex).queueFlags() & VK_QUEUE_GRAPHICS_BIT) != 0) {
                         hasGraphicsQueueFamily = true;
                     }
